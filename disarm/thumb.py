@@ -101,6 +101,7 @@ class Thumb:
         def setstate(self, state):
             if state.pc is not None:
                 self.jmp = Jump(state.pc + self.offset)
+            super().setstate(state)
 
     @opcode
     class B_1(JumpOpcode):
