@@ -336,34 +336,6 @@ def dis(f, base=BASE, skip_undefined=True):
                 out(data.pc, word, str(op))
     
 
-"""
-        if bits.startswith('111'):
-            h = word >> 11 & 0b10
-            if h == 0b00:
-                jmp = pc + (word & 0x7ff)
-                out(pc, word, "b 0x{0:08x}", jmp,)
-            elif h == 0b10:
-                jmp = pc + (signextend(word & 0x7ff, 11) << 12)
-                nword = next(g)
-                pc += 2
-                if nword >> 13 == 0b111:
-                    h2 = nword >> 11 & 0b11
-                    if h2 == 0b11:
-                        jmp += ((nword & 0x7ff) << 1)
-                        out(pc-2, word, "bl 0x{0:08x}", jmp)
-                        #out(pc, nword, "*blh")
-                    elif h2 == 0b01:
-                        jmp = (jmp + ((nword & 0x7ff) << 1)) & 0xfffffffc
-                        out(pc-2, word, "blx 0x{0:08x}", jmp)
-                else:
-                    out(pc-2, word, "<bl missing blh>", word)
-                    word = nword
-                    continue
-        else:
-            #out(pc, "{0:04x}".format(word))
-            #break
-            pass
-"""
 
 def parse_opcode(word, data):
     # A dumb O(n) search
