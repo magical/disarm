@@ -1,0 +1,15 @@
+disarm is an ARM/THUMB disassembler.
+
+This project is still in its infancy, and as such it is rather incomplete.
+Currently only THUMB is supported, and only a few instructions at that.
+
+Depending on whether i manage to stay interested, it may evolve into a full
+decompiler. The first step is to generate an AST...
+
+USAGE
+
+There's no real CLI yet, but this should work for now:
+
+    python3 disarm/thumb.py file
+
+
