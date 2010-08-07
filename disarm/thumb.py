@@ -14,6 +14,8 @@ class Opcode(metaclass=OpcodeType):
     @classmethod
     def match(cls, word):
         return (word & cls.mask) == cls.maskval
+    def setstate(self, state):
+        pass
 
 class Register:
     def __init__(self, n):
@@ -35,8 +37,14 @@ class Immed:
     def __bool__(self):
         return bool(self.n)
 
-class UndefinedOpcode:
-    def __init__(self, word, pc):
+class Jump:
+    def __init__(self, addr):
+        self.addr = addr
+    def __str__(self):
+        return ":{:08X}".format(self.addr)
+
+class UndefinedOpcode(Opcode):
+    def __init__(self, word):
         self.word = word
     def __str__(self):
         return "<undefined opcode>"
@@ -65,9 +73,8 @@ class Thumb:
     class ADD_1(Opcode):
         pattern = '000 11 10 xxx xxx xxx'
 
-        def __init__(self, word, pc):
+        def __init__(self, word):
             self.word = word
-            self.pc = pc
             self.dest = Register(word & 0b111)
             self.a = Register(word >> 3 & 0b111)
             self.b = Immed(word >> 6 & 0b111)
@@ -82,78 +89,78 @@ class Thumb:
     class ADD_2(Opcode):
         pattern = '001 10 xxx xxxxxxxx'
 
-        def __init__(self, word, pc):
+        def __init__(self, word):
             self.word = word
-            self.pc = pc
             self.dest = Register(word >> 8 & 0b111)
             self.a = Immed(word & 0xff)
         
         def __str__(self):
             return "add {self.dest},{self.a}".format(self=self)
 
+    class JumpOpcode(Opcode):
+        def setstate(self, state):
+            if state.pc is not None:
+                self.jmp = Jump(state.pc + self.offset)
+
     @opcode
-    class B_1(Opcode):
+    class B_1(JumpOpcode):
         pattern = '1101 xxxx xxxxxxxx'
 
         conds = "eq ne lo hs mi pl vs vc hi ls ge lt gt le al nv".split()
 
-        def __init__(self, word, pc):
+        def __init__(self, word):
             self.word = word
-            self.pc = pc
 
             self.cond = word >> 8 & 0xf
 
-            n = signextend(word & 0xff, 8)
-            self.jmp = self.pc + (n * 2)
-        
+            self.offset = signextend(word & 0xff, 8) * 2
+            self.jmp = None
+
         def __str__(self):
             cond = '' if self.cond == 14 else self.conds[self.cond]
-            return "b{} #{self.jmp:#08x}".format(cond, self=self)
+            return "b{} {self.jmp}".format(cond, self=self)
 
     @opcode
-    class B_2(Opcode):
+    class B_2(JumpOpcode):
         pattern = '11100 xxxxxxxxxxx'
 
-        def __init__(self, word, pc):
+        def __init__(self, word):
             self.word = word
-            self.pc = pc
+            self.offset = signextend(word & 0x7ff, 11) * 2
+            self.jmp = None
 
-            n = signextend(word & 0x7ff, 11)
-            self.jmp = self.pc + (n * 2)
-        
         def __str__(self):
-            return "b #{self.jmp:#08x}".format(self=self)
+            return "b {self.jmp}".format(self=self)
 
     @opcode
-    class BL(Opcode):
-        def __init__(self, dword, pc):
+    class BL(JumpOpcode):
+        def __init__(self, dword):
             self.word = dword
-            self.pc = pc
 
             n = (dword >> 16 & 0x7ff) << 12 
             n += (dword & 0x7ff) << 1
             n = signextend(n, 11+11+1)
-            self.jmp = pc + n
-        
+            self.offset = n
+            self.jmp = None
+
         @classmethod
         def match(cls, word):
             return False
 
         def __str__(self):
-            return "bl #{self.jmp:#08x}".format(self=self)
+            return "bl {self.jmp}".format(self=self)
 
     @opcode
     class BLX(BL):
         def __str__(self):
-            return "blx #{self.jmp:#08x}".format(self=self)
+            return "blx {self.jmp}".format(self=self)
 
     @opcode
     class CMP_1(Opcode):
         pattern = '00101 xxx xxxxxxxx'
 
-        def __init__(self, word, pc):
+        def __init__(self, word):
             self.word = word
-            self.pc = pc
             self.a = Register(word >> 8 & 0b111)
             self.b = Immed(word & 0xff)
 
@@ -182,9 +189,8 @@ class Thumb:
         pattern = '010000 1101 xxx xxx'
         mask, maskval = parse_pattern(pattern)
 
-        def __init__(self, word, pc):
+        def __init__(self, word):
             self.word = word
-            self.pc = pc
             self.dest = Register(word & 0b111)
             self.a = Register(word >> 3 & 0b111)
         
@@ -195,9 +201,8 @@ class Thumb:
     class PUSH(Opcode):
         pattern = '1011 010 x xxxxxxxx'
 
-        def __init__(self, word, pc):
+        def __init__(self, word):
             self.word = word
-            self.pc = pc
             self.registers = [Register(i) for i in range(8) if word >> i & 1]
             if word >> 8 & 1:
                 self.registers.append(Register(14))
@@ -210,9 +215,8 @@ class Thumb:
     class POP(Opcode):
         pattern = '1011 110 x xxxxxxxx'
 
-        def __init__(self, word, pc):
+        def __init__(self, word):
             self.word = word
-            self.pc = pc
             self.registers = [Register(i) for i in range(8) if word >> i & 1]
             if word >> 8 & 1:
                 self.registers.append(Register(15))
@@ -301,35 +305,42 @@ class ROMFile:
         from copy import copy
         return ROMFile(copy(self.f), self.base)
     
+class State:
+    pass
 
 def dis(f, base=BASE, skip_undefined=True):
     def out(pc, word, s=None, *args, **kwargs):
-        print("{0:08X} {1:04X}     {2}".format(pc-4, word, s))
+        print(":{0:08X} {1:04X}     {2}".format(pc-4, word, s))
     def out2(pc, word, s=None, *args, **kwargs):
-        print("{0:08X} {1:08X} {2}".format(pc-4, word, s))
+        print(":{0:08X} {1:08X} {2}".format(pc-4, word, s))
 
     data = ROMFile(f, base)
+    state = State()
+    state.pc = data.pc
 
     for word in data.iterwords():
-        # special processing for the BL instruction
+        state.pc = data.pc
         if word >> 11 == 0b11110:
-            pc_ = data.pc
+            # special processing for the BL instruction
             word2 = data.readword()
             dword = word << 16 | word2
             if word2 >> 11 == 0b11111:
-                op = Thumb.BL(dword, pc_)
-                out2(pc_, dword, op)
+                op = Thumb.BL(dword)
+                op.setstate(state)
+                out2(state.pc, dword, op)
             elif word2 >> 11 == 0b11101:
-                op = Thumb.BLX(dword, pc_)
-                out2(pc_, dword, op)
+                op = Thumb.BLX(dword)
+                op.setstate(state)
+                out2(state.pc, dword, op)
             else:
                 #op = UndefinedOpcode(word, pc_)
                 #out(pc_, word, str(op))
                 #op = UndefinedOpcode(word2, data.pc)
                 #out(data.pc, word, str(op))
-                out2(pc_, dword, UndefinedOpcode(dword, pc_))
+                out2(state.pc, dword, UndefinedOpcode(dword))
         else:   
-            op = parse_opcode(word, data)
+            op = parse_opcode(word)
+            op.setstate(state)
             if skip_undefined and type(op) is UndefinedOpcode:
                 pass
             else:
@@ -337,12 +348,12 @@ def dis(f, base=BASE, skip_undefined=True):
     
 
 
-def parse_opcode(word, data):
+def parse_opcode(word):
     # A dumb O(n) search
     for opcode in Thumb._opcodes:
         if opcode.match(word):
-            return opcode(word, data.pc)
-    return UndefinedOpcode(word, data.pc)
+            return opcode(word)
+    return UndefinedOpcode(word)
 
 if __name__ == '__main__':
     f = open(sys.argv[1], 'rb')
