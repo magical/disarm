@@ -8,7 +8,7 @@ class OpcodeType(type):
     def __new__(cls, name, bases, dict):
         if 'pattern' in dict:
             dict['mask'], dict['maskval'] = parse_pattern(dict['pattern'])
-        return super(OpcodeType, cls).__new__(cls, name, bases, dict)
+        return super().__new__(cls, name, bases, dict)
 
 class Opcode(metaclass=OpcodeType):
     @classmethod
