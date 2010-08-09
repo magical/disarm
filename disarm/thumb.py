@@ -2,6 +2,7 @@
 #incomplete thumb disassembler
 
 import sys
+import os
 from struct import pack, unpack
 
 class OpcodeType(type):
@@ -99,9 +100,9 @@ class Thumb:
 
     class JumpOpcode(Opcode):
         def setstate(self, state):
+            super().setstate(state)
             if state.pc is not None:
                 self.jmp = Jump(state.pc + self.offset)
-            super().setstate(state)
 
     @opcode
     class B_1(JumpOpcode):
@@ -199,6 +200,33 @@ class Thumb:
             return "mul {self.dest},{self.a}".format(self=self)
 
     @opcode
+    class LDR_3(Opcode):
+        pattern = '01001 xxx xxxxxxxx'
+
+        def __init__(self, word):
+            self.word = word
+            self.dest = Register(word >> 8 & 0b111)
+            self.offset = (word & 0xff) * 4
+            self.addr = None
+            self.value = None
+
+        def setstate(self, state):
+            if state.pc is not None:
+                self.addr = (state.pc & ~3) + self.offset
+                if state.data is not None:
+                    self.value = Immed(
+                        unpack("<L", state.data[self.addr:self.addr+4])[0]
+                    )
+            super().setstate(state)
+
+        def __str__(self):
+            if self.value is not None:
+                return "ldr {self.dest},={self.value}\t; [{self.addr:#08x}]".format(self=self)
+            else:
+                return "ldr {self.dest},[{self.addr:#08x}]".format(self=self)
+            return s
+
+    @opcode
     class PUSH(Opcode):
         pattern = '1011 010 x xxxxxxxx'
 
@@ -239,6 +267,7 @@ class ROMFile:
     def __init__(self, f, base):
         self.f = f
         self.base = base
+        self.size = os.path.getsize(f.name)
     
     @property
     def pc(self):
@@ -317,7 +346,8 @@ def dis(f, base=BASE, skip_undefined=True):
 
     data = ROMFile(f, base)
     state = State()
-    state.pc = data.pc
+    state.pc = 0
+    state.data = data
 
     for word in data.iterwords():
         state.pc = data.pc
@@ -358,6 +388,6 @@ def parse_opcode(word):
 
 if __name__ == '__main__':
     f = open(sys.argv[1], 'rb')
-    dis(f, 0x2246770)
+    dis(f, 0x2246770, skip_undefined=False)
     
 
