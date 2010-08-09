@@ -154,6 +154,15 @@ class Thumb:
 
     @opcode
     class BLX(BL):
+        def __init__(self, dword):
+            super().__init__(dword)
+            assert dword & 1 == 0
+
+        def setstate(self, state):
+            super().setstate(state)
+            if self.jmp is not None:
+                self.jmp.addr &= ~3
+
         def __str__(self):
             return "blx {self.jmp}".format(self=self)
 
